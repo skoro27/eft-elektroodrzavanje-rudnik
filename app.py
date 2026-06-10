@@ -9,7 +9,6 @@ st.set_page_config(page_title="Elektro Održavanje - Rudnik", layout="wide")
 st.title("⚡ Elektro Održavanje - Rudnik")
 st.caption("Analiza potrošnje energije pomoću Groq AI")
 
-# API ključ iz Render Environment Variables
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # ========== SIDEBAR ==========
@@ -25,46 +24,76 @@ with st.sidebar:
         
         try:
             conn = sqlite3.connect("baza.db")
+            cursor = conn.cursor()
             
             if uploaded_file.name.endswith('.csv'):
-                # CSV fajl - pročitaj i kreiraj tabelu
                 df = pd.read_csv(uploaded_file)
                 df.to_sql('podaci', conn, if_exists='replace', index=False)
                 st.success(f"✅ CSV učitana! ({len(df)} redova, {len(df.columns)} kolona)")
                 
             elif uploaded_file.name.endswith(('.xlsx', '.xls')):
-                # Excel fajl
                 df = pd.read_excel(uploaded_file)
                 df.to_sql('podaci', conn, if_exists='replace', index=False)
                 st.success(f"✅ Excel učitana! ({len(df)} redova, {len(df.columns)} kolona)")
                 
             elif uploaded_file.name.endswith('.sql'):
-                # SQL fajl
-                with open("baza.sql", "w", encoding="utf-8") as f:
-                    f.write(file_content.decode("utf-8", errors="ignore"))
-                
-                cursor = conn.cursor()
                 sql_text = file_content.decode("utf-8", errors="ignore")
+                
+                # AGResivno čišćenje MySQL sintakse
                 sql_text = re.sub(r'--.*', '', sql_text)
                 sql_text = re.sub(r'/\*.*?\*/', '', sql_text, flags=re.DOTALL)
+                sql_text = re.sub(r'SET\s+\w+.*?;', '', sql_text, flags=re.IGNORECASE)
+                sql_text = re.sub(r'START TRANSACTION;', '', sql_text, flags=re.IGNORECASE)
+                sql_text = re.sub(r'COMMIT;', '', sql_text, flags=re.IGNORECASE)
                 sql_text = re.sub(r'ENGINE=\w+', '', sql_text)
                 sql_text = re.sub(r'AUTO_INCREMENT=\d+', '', sql_text)
                 sql_text = re.sub(r'DEFAULT CHARSET=\w+', '', sql_text)
-                sql_text = re.sub(r'COLLATE=\w+', '', sql_text)
-                sql_text = re.sub(r'`', '"', sql_text)
+                sql_text = re.sub(r'COLLATE\s+\w+', '', sql_text)
+                sql_text = re.sub(r'CHARACTER SET\s+\w+', '', sql_text)
+                sql_text = re.sub(r'ROW_FORMAT=\w+', '', sql_text)
+                sql_text = re.sub(r'`', '', sql_text)  # briši backtick-ove
+                sql_text = re.sub(r'int\(\d+\)', 'INTEGER', sql_text)  # int(11) → INTEGER
+                sql_text = re.sub(r'varchar\(\d+\)', 'TEXT', sql_text)  # varchar → TEXT
+                sql_text = re.sub(r'datetime', 'TEXT', sql_text)
+                sql_text = re.sub(r'tinyint\(\d+\)', 'INTEGER', sql_text)
+                sql_text = re.sub(r'COMMENT\s+\'[^\']*\'', '', sql_text)
                 
-                statements = [s.strip() for s in sql_text.split(';') if s.strip()]
-                for statement in statements:
-                    if statement.upper().startswith(('CREATE', 'INSERT', 'ALTER', 'DROP')):
+                # Nađi INSERT naredbe
+                insert_pattern = re.findall(r'INSERT INTO.*?;\s*', sql_text, re.IGNORECASE | re.DOTALL)
+                
+                if insert_pattern:
+                    # Prvo kreiraj tabelu
+                    create_match = re.search(r'CREATE TABLE.*?;', sql_text, re.IGNORECASE | re.DOTALL)
+                    if create_match:
                         try:
-                            cursor.execute(statement)
+                            cursor.execute(create_match.group(0))
+                        except Exception as e:
+                            st.warning(f"CREATE TABLE preskočena: {str(e)[:100]}")
+                    
+                    # Onda ubaci podatke
+                    broj_inserta = 0
+                    for ins in insert_pattern[:50]:  # maks 50 INSERT naredbi za brzinu
+                        try:
+                            cursor.execute(ins)
+                            broj_inserta += 1
                         except:
                             pass
-                conn.commit()
-                st.success("✅ SQL fajl učitana!")
+                    
+                    conn.commit()
+                    st.success(f"✅ SQL učitana! ({broj_inserta} INSERT naredbi izvršeno)")
+                else:
+                    # Samo CREATE TABLE, bez INSERT
+                    statements = [s.strip() for s in sql_text.split(';') if s.strip()]
+                    for statement in statements:
+                        if statement.upper().startswith(('CREATE', 'INSERT', 'ALTER')):
+                            try:
+                                cursor.execute(statement)
+                            except:
+                                pass
+                    conn.commit()
+                    st.success("✅ SQL fajl učitana!")
                 
             else:
-                # .db fajl
                 with open("baza.db", "wb") as f:
                     f.write(file_content)
                 st.success("✅ Baza učitana!")
@@ -110,10 +139,10 @@ if st.button("🔍 Analiziraj", type="primary", use_container_width=True):
                     st.stop()
                 
                 prva_tabela = tabele[0]
-                cursor.execute(f"SELECT * FROM `{prva_tabela}` LIMIT 5")
+                cursor.execute(f"SELECT * FROM {prva_tabela} LIMIT 5")
                 kolone = [desc[0] for desc in cursor.description]
                 redovi = cursor.fetchall()
-                ukupno = cursor.execute(f"SELECT COUNT(*) FROM `{prva_tabela}`").fetchone()[0]
+                ukupno = cursor.execute(f"SELECT COUNT(*) FROM {prva_tabela}").fetchone()[0]
                 
                 kontekst = f"""
 Tabela '{prva_tabela}' ima {len(kolone)} kolona i {ukupno} redova.
@@ -169,7 +198,7 @@ if uploaded_file:
         
         if tabele:
             prva_tabela = tabele[0]
-            query = f"SELECT * FROM `{prva_tabela}` LIMIT 100"
+            query = f"SELECT * FROM {prva_tabela} LIMIT 100"
             df = pd.read_sql_query(query, conn)
             st.dataframe(df, use_container_width=True)
             
