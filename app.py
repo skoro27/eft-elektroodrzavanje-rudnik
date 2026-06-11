@@ -39,59 +39,35 @@ with st.sidebar:
             elif uploaded_file.name.endswith('.sql'):
                 sql_text = file_content.decode("utf-8", errors="ignore")
                 
-                # AGResivno čišćenje MySQL sintakse
-                sql_text = re.sub(r'--.*', '', sql_text)
-                sql_text = re.sub(r'/\*.*?\*/', '', sql_text, flags=re.DOTALL)
-                sql_text = re.sub(r'SET\s+\w+.*?;', '', sql_text, flags=re.IGNORECASE)
-                sql_text = re.sub(r'START TRANSACTION;', '', sql_text, flags=re.IGNORECASE)
-                sql_text = re.sub(r'COMMIT;', '', sql_text, flags=re.IGNORECASE)
-                sql_text = re.sub(r'ENGINE=\w+', '', sql_text)
-                sql_text = re.sub(r'AUTO_INCREMENT=\d+', '', sql_text)
-                sql_text = re.sub(r'DEFAULT CHARSET=\w+', '', sql_text)
-                sql_text = re.sub(r'COLLATE\s+\w+', '', sql_text)
-                sql_text = re.sub(r'CHARACTER SET\s+\w+', '', sql_text)
-                sql_text = re.sub(r'ROW_FORMAT=\w+', '', sql_text)
-                sql_text = re.sub(r'`', '', sql_text)  # briši backtick-ove
-                sql_text = re.sub(r'int\(\d+\)', 'INTEGER', sql_text)  # int(11) → INTEGER
-                sql_text = re.sub(r'varchar\(\d+\)', 'TEXT', sql_text)  # varchar → TEXT
-                sql_text = re.sub(r'datetime', 'TEXT', sql_text)
-                sql_text = re.sub(r'tinyint\(\d+\)', 'INTEGER', sql_text)
-                sql_text = re.sub(r'COMMENT\s+\'[^\']*\'', '', sql_text)
+                # Nađi CREATE TABLE
+                create_match = re.search(r'CREATE TABLE.*?;', sql_text, re.IGNORECASE | re.DOTALL)
                 
-                # Nađi INSERT naredbe
-                insert_pattern = re.findall(r'INSERT INTO.*?;\s*', sql_text, re.IGNORECASE | re.DOTALL)
-                
-                if insert_pattern:
-                    # Prvo kreiraj tabelu
-                    create_match = re.search(r'CREATE TABLE.*?;', sql_text, re.IGNORECASE | re.DOTALL)
-                    if create_match:
-                        try:
-                            cursor.execute(create_match.group(0))
-                        except Exception as e:
-                            st.warning(f"CREATE TABLE preskočena: {str(e)[:100]}")
+                if create_match:
+                    create_sql = create_match.group(0)
+                    # Očisti MySQL sintaksu
+                    create_sql = re.sub(r'`', '', create_sql)
+                    create_sql = re.sub(r'bigint\(\d+\)', 'INTEGER', create_sql)
+                    create_sql = re.sub(r'int\(\d+\)', 'INTEGER', create_sql)
+                    create_sql = re.sub(r'varchar\(\d+\)', 'TEXT', create_sql)
+                    create_sql = re.sub(r'datetime', 'TEXT', create_sql)
+                    create_sql = re.sub(r'tinyint\(\d+\)', 'INTEGER', create_sql)
+                    create_sql = re.sub(r'float', 'REAL', create_sql)
+                    create_sql = re.sub(r'double', 'REAL', create_sql)
+                    create_sql = re.sub(r'decimal\(\d+,\d+\)', 'REAL', create_sql)
+                    create_sql = re.sub(r'COMMENT\s+\'[^\']*\'', '', create_sql)
+                    create_sql = re.sub(r'AUTO_INCREMENT', '', create_sql)
+                    create_sql = re.sub(r'NOT NULL', '', create_sql)
+                    create_sql = re.sub(r'DEFAULT NULL', '', create_sql)
                     
-                    # Onda ubaci podatke
-                    broj_inserta = 0
-                    for ins in insert_pattern[:50]:  # maks 50 INSERT naredbi za brzinu
-                        try:
-                            cursor.execute(ins)
-                            broj_inserta += 1
-                        except:
-                            pass
-                    
-                    conn.commit()
-                    st.success(f"✅ SQL učitana! ({broj_inserta} INSERT naredbi izvršeno)")
+                    try:
+                        cursor.execute(create_sql)
+                        conn.commit()
+                        st.success("✅ Tabela kreirana iz SQL fajla!")
+                    except Exception as e:
+                        st.error(f"Greška: {str(e)[:200]}")
+                        st.code(create_sql[:500], language="sql")
                 else:
-                    # Samo CREATE TABLE, bez INSERT
-                    statements = [s.strip() for s in sql_text.split(';') if s.strip()]
-                    for statement in statements:
-                        if statement.upper().startswith(('CREATE', 'INSERT', 'ALTER')):
-                            try:
-                                cursor.execute(statement)
-                            except:
-                                pass
-                    conn.commit()
-                    st.success("✅ SQL fajl učitana!")
+                    st.error("❌ Nije pronađena CREATE TABLE naredba!")
                 
             else:
                 with open("baza.db", "wb") as f:
