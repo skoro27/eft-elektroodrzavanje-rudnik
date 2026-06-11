@@ -58,6 +58,9 @@ with st.sidebar:
                     create_sql = re.sub(r'AUTO_INCREMENT', '', create_sql)
                     create_sql = re.sub(r'NOT NULL', '', create_sql)
                     create_sql = re.sub(r'DEFAULT NULL', '', create_sql)
+                    # Dodaj navodnike oko brojčanih imena
+                    create_sql = re.sub(r'TABLE\s+(\d\w*)', r'TABLE "\1"', create_sql)
+                    create_sql = re.sub(r'(\s)(\d\w*)', r'\1"\2"', create_sql)
                     
                     try:
                         cursor.execute(create_sql)
@@ -115,10 +118,10 @@ if st.button("🔍 Analiziraj", type="primary", use_container_width=True):
                     st.stop()
                 
                 prva_tabela = tabele[0]
-                cursor.execute(f"SELECT * FROM {prva_tabela} LIMIT 5")
+                cursor.execute(f'SELECT * FROM "{prva_tabela}" LIMIT 5')
                 kolone = [desc[0] for desc in cursor.description]
                 redovi = cursor.fetchall()
-                ukupno = cursor.execute(f"SELECT COUNT(*) FROM {prva_tabela}").fetchone()[0]
+                ukupno = cursor.execute(f'SELECT COUNT(*) FROM "{prva_tabela}"').fetchone()[0]
                 
                 kontekst = f"""
 Tabela '{prva_tabela}' ima {len(kolone)} kolona i {ukupno} redova.
@@ -174,7 +177,7 @@ if uploaded_file:
         
         if tabele:
             prva_tabela = tabele[0]
-            query = f"SELECT * FROM {prva_tabela} LIMIT 100"
+            query = f'SELECT * FROM "{prva_tabela}" LIMIT 100'
             df = pd.read_sql_query(query, conn)
             st.dataframe(df, use_container_width=True)
             
