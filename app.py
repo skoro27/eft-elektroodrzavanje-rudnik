@@ -45,7 +45,7 @@ with st.sidebar:
                 if create_match:
                     create_sql = create_match.group(0)
                     # Očisti MySQL sintaksu
-                    create_sql = re.sub(r'`', '', create_sql)
+                    create_sql = re.sub(r'`', '"', create_sql)
                     create_sql = re.sub(r'bigint\(\d+\)', 'INTEGER', create_sql)
                     create_sql = re.sub(r'int\(\d+\)', 'INTEGER', create_sql)
                     create_sql = re.sub(r'varchar\(\d+\)', 'TEXT', create_sql)
